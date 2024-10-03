@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Leaflet Map with City Search and Voice Commands</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        #map { height: 500px; width: 100%; }
+        #controls { margin: 10px; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <input type="text" id="search-box" placeholder="Enter city name" onkeydown="if(event.key === 'Enter') searchCity()" />
+        <button onclick="searchCity()">Search</button>
+        <button onclick="startVoiceRecognition()">Voice Search</button>
+    </div>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-routing-machine/3.2.12/leaflet-routing-machine.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet-routing-machine/3.2.12/leaflet-routing-machine.css" />
+
+    <script>
+        var map = L.map('map').setView([51.505, -0.09], 13);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        var routeControl;
+
+        function searchCity() {
+            var cityName = document.getElementById('search-box').value.trim();
+            if (cityName === '') {
+                alert('Please enter a city name');
+                return;
+            }
+            var url = `https://nominatim.openstreetmap.org/search?format=json&q=${cityName}`;
+
+            axios.get(url)
+                .then(function (response) {
+                    if (response.data.length > 0) {
+                        var lat = response.data[0].lat;
+                        var lon = response.data[0].lon;
+                        map.setView(new L.LatLng(lat, lon), 13);
+                    } else {
+                        alert('City not found');
+                    }
+                })
+                .catch(function (error) {
+                    console.log(error);
+                });
+        }
+
+        function startVoiceRecognition() {
+            if (!('webkitSpeechRecognition' in window)) {
+                alert('Sorry, your browser does not support the Web Speech API. Please use a compatible browser.');
+                return;
+            }
+
+            var recognition = new webkitSpeechRecognition();
+            recognition.lang = 'en-US';
+            recognition.interimResults = false;
+            recognition.maxAlternatives = 1;
+
+            recognition.onresult = function(event) {
+                var command = event.results[0][0].transcript.toLowerCase();
+                document.getElementById('search-box').value = command;
+                if (command.includes('zoom in')) {
+                    map.zoomIn();
+                } else if (command.includes('zoom out')) {
+                    map.zoomOut();
+                } else if (command.startsWith('route from')) {
+                    var places = command.replace('route from', '').trim().split('to');
+                    if (places.length === 2) {
+                        routeFromTo(places[0].trim(), places[1].trim());
+                    } else {
+                        alert('Please say "route from [city A] to [city B]"');
+                    }
+                } else {
+                    searchCity();
+                }
+            };
+
+            recognition.onerror = function(event) {
+                console.error('Speech recognition error detected: ' + event.error);
+                alert('Speech recognition error detected: ' + event.error);
+            };
+
+            recognition.onend = function() {
+                console.log('Speech recognition service disconnected');
+            };
+
+            recognition.start();
+        }
+
+        function routeFromTo(cityA, cityB) {
+            var urlA = `https://nominatim.openstreetmap.org/search?format=json&q=${cityA}`;
+            var urlB = `https://nominatim.openstreetmap.org/search?format=json&q=${cityB}`;
+
+            axios.all([
+                axios.get(urlA),
+                axios.get(urlB)
+            ]).then(axios.spread(function (responseA, responseB) {
+                if (responseA.data.length > 0 && responseB.data.length > 0) {
+                    var latA = responseA.data[0].lat;
+                    var lonA = responseA.data[0].lon;
+                    var latB = responseB.data[0].lat;
+                    var lonB = responseB.data[0].lon;
+
+                    if (routeControl) {
+                        map.removeControl(routeControl);
+                    }
+
+                    routeControl = L.Routing.control({
+                        waypoints: [
+                            L.latLng(latA, lonA),
+                            L.latLng(latB, lonB)
+                        ],
+                        createMarker: function() { return null; }
+                    }).addTo(map);
+
+                    map.setView(new L.LatLng(latA, lonA), 13);
+                } else {
+                    alert('One or both cities not found');
+                }
+            })).catch(function (error) {
+                console.log(error);
+            });
+        }
+    </script>
+</body>
+</html>
